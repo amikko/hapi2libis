@@ -647,8 +647,6 @@ if crs_table_gases['O2-O2']['use']:
     table_O2_O2 = np.loadtxt(table_O2_O2_paths[crs_table_gases['O2-O2']['id']])
 
 if __name__ == '__main__':
-    import time
-    # this is to time the computations
     # the lines are downloaded every time, so we do not want to include
     # that into the script timing.
     
@@ -678,7 +676,6 @@ if __name__ == '__main__':
     # Main loop
     profile = []
     
-    start_time = time.time()
     for l in range(len(altitude) - 1):
         print('\nComputing {} {}/{}'.format(['layer', 'level'][slab_midpoint_flag], l + 1, len(altitude) - 1))
         
