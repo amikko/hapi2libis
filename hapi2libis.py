@@ -50,7 +50,7 @@ selected_gases = settings['selected_gases']
 boundary_flag = settings['boundary_flag']
 
 # Compute at level or layer midpoint
-slab_midpoint_flag = settings['slab_midpoint_flag']
+slab_midpoint_flag = settings['interpolate_to_layer_midpoint']
 
 # Return maximum range for non-reflectivity calculations.
 # Requires full kurucs irradiance file from libRadtran!
@@ -92,7 +92,6 @@ interpolation_error_tolerance = settings['interpolation_error_tolerance']
 ###-------------------------------------------------------------------------###
 ###-------------------------------------------------------------------------###
 ###-------------------------------------------------------------------------###
-
 
 atmosphere_dict = {1:'afglms', # midlatitude summer
                    2:'afglmw', # midlatitude winter
@@ -620,11 +619,9 @@ def oxygen_dimer(wavelength, data):
 # Check that table gases are not downloaded by HAPI
 for crs_table_gas_id in crs_table_gases:
     if crs_table_gases[crs_table_gas_id]['use']:
-        #if crs_table_gas_id in fetched_gases:
-        #    print(f"WARNING! HAPI has downloaded {crs_table_gas_id} lines.")
-        #    answer = input(f"Are you sure you want to use table {crs_table_gas_id} lines (possible overlap)? [N/y] ").lower()
-        #    if answer not in ['y','yes']:
-        #        raise Exception('Aborting!')
+        if crs_table_gas_id in fetched_gases:
+            print(f"\nWARNING! HAPI has downloaded {crs_table_gas_id} lines." * 10)
+            print("Beware of possible overlap with table values!")
         lookup_table_gases.append(crs_table_gas_id)
 
 if crs_table_gases['O3']['use']:
@@ -647,6 +644,8 @@ if crs_table_gases['O2-O2']['use']:
     table_O2_O2 = np.loadtxt(table_O2_O2_paths[crs_table_gases['O2-O2']['id']])
 
 if __name__ == '__main__':
+    import time
+    # this is to time the computations
     # the lines are downloaded every time, so we do not want to include
     # that into the script timing.
     
@@ -676,6 +675,7 @@ if __name__ == '__main__':
     # Main loop
     profile = []
     
+    start_time = time.time()
     for l in range(len(altitude) - 1):
         print('\nComputing {} {}/{}'.format(['layer', 'level'][slab_midpoint_flag], l + 1, len(altitude) - 1))
         
