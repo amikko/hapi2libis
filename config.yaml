@@ -1,0 +1,102 @@
+# Config file for HAPI2LIBIS.
+# If you want to run HAPI2LIBIS without libRadtran installation
+# please set crs_table_gases to False and use custom atmosphere.
+
+##############################################################################
+### BASIC OPTIONS ###
+##############################################################################
+
+# Location of main libRadtran folder.
+libradtranpath: '/home/kukkurai/bin/libRadtran-2.0.5'
+# libradtranpath: '/home/mikkonea/Projects/arsca-suite/rt_solvers/libradtran/libRadtran-2.0.5'
+
+# Desired wavelength range in nanometers.
+wl_range_nm : [1600,1700]
+
+# HAPI resolution in wavenumbers.
+nu_resolution: 0.01
+
+# Choose atmosphere file.
+# 1: midlatitude summer, 2: midlatitude winter, 3: subarctic summer,
+# 4: subarctic winter, 5: tropical, 6: US-standard,
+# 'custom': read the custom atmosphere file, specified in advanced options custom_atm_dict
+atmosphere_id: 1
+#atmosphere_id: 'custom'
+
+# Name suffix for the created molecular absorption file.
+name_suffix : 'test_file'
+
+# List of gases to compute.
+selected_gases : ['O2','H2O','NO2','CO2']
+
+# Broadening function choice.
+function_choice: 'Voigt'
+
+# Use irregular interpolation.
+use_xsec_db: True
+
+##############################################################################
+### ADVANCED OPTIONS ###
+##############################################################################
+
+# Folder to save irregular interpolation files.
+xsec_db_folder: './csdb'
+# Closest N points from the database which are used in the interpolation.
+# Set this to 0 to force the computation of the cross-sections.
+cl_interp_p: 16
+interpolation_method: 'bounding-box'
+#interpolation_method: 'nearest-neighbour'
+# The interpolation_error_tolerance is the maximum volume of the box allowed
+# for interpolation, or the maximum distance from particular point.
+interpolation_error_tolerance: 0.1
+
+# Folder to save HITRAN data.
+hapi_dl_dir: 'hitran_data'
+
+# Load profiles for CH4, N2O, CO and N2 from auxiliary US-standard files.
+load_aux_gases_from_us_standard: True
+
+# Write molecular absorption netcdf file for libradtran.
+create_mol_abs_netcdf_file: True
+
+# Interpolate atm to layer middle point.
+interpolate_to_layer_midpoint: True
+
+# Force edges to range.
+boundary_flag: False
+
+# Return maximum range for non-reflectivity calculations.
+# Requires full kurucs irradiance file from libRadtran!
+check_wavelength_limits: True
+
+# Define if gas cross-section data should come from libRadtran tables.
+# The first one is the default. 
+crs_table_gases: 
+    'O3': 
+        'use': True
+        'id': 'molina' # molina; bass_and_paur, daumount, bogumil, bogumil_exp
+    'NO2':
+        'use': True
+        'id': 'burrows' # burrows; bogumil, schneider, bogumil_exp
+    'O2-O2': 
+        'use': True
+        'id': 'greenblatt' # greenblatt
+
+
+# Custom atmosphere loading requires a dict with gases column number.
+# Check variable "atm_col_id_dict" in main script for example.
+# Columns z (km), p (mb), T (K), air (cm-3) are minimum requirement.
+custom_atm_dict:
+    'filepath' : './atmos_files/sod_atmos_198593.dat'
+    'col_ids': 
+        'altitude': 0
+        'pressure': 1 
+        'temperature': 2 
+        'air': 3
+        'O3': 4
+        'O2': 5
+        'H2O': 6
+        'CO2': 7
+        'NO2': 8
+
+
