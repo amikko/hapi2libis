@@ -1,35 +1,76 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# HAPI2LIBIS v1.0
+# HAPI2LIBIS v1.0.0-dev
 # Authors: Antti Kukkurainen1 & Antti Mikkonen1
 # 1: Finnish Meteorological Institute
 # Correspondence: antti.kukkurainen@fmi.fi
 
+import os
+import sys
+import time
+from pathlib import Path
 
 import hapi
+import numpy as np
+import yaml
+import netCDF4
+from netCDF4 import Dataset
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
-import numpy as np
-from netCDF4 import Dataset
-import os
-import netCDF4
-import time
-import yaml
-import sys
     
-try:
-    with open(sys.argv[1], 'r') as settings_file:
-        settings = yaml.safe_load(settings_file)  
-    print(f"Settings loaded from file: {sys.argv[1]}\n")
+# Set new default YAML config path or None to use "config.yaml"
+DEFAULT_CONFIG_PATH = None
 
-except(IndexError):
-    print('\nNo settings file given for HAPI2LIBIS!')
-    print("Trying to load default settings file: config.yaml")
+def load_settings(config_path=None):
+    """
+    Load  configuration from YAML file.
+
+    Parameters
+    ----------
+    config_path : str, optional
+        Path to config file. If None, tries command-line argument sys.argv.[1]
+        then "config.yaml". The default is None.
+
+    Returns
+    -------
+    settings : dict
+        Configuration settings.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no valid config file found.
+    ValueError
+        If invalid value encountered in the settings file.
+    """
     
-    with open('config.yaml', 'r') as settings_file:
-        settings = yaml.safe_load(settings_file)  
+    if config_path is None:
+        if len(sys.argv) > 1:
+            config_path = sys.argv[1]
+        else:
+            print('No settings file given as argument for HAPI2LIBIS.')
+            print("Trying to load default settings file: config.yaml")
+            config_path = 'config.yaml'
     
-    print("Settings loaded!\n")
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    try:
+        with open(config_file, 'r') as f:
+            settings = yaml.safe_load(f)  
+        print(f"Settings loaded from file: {config_path}")
+        return settings
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in config file: {e}")
+    
+# Load settings from YAML file
+try:
+    settings = load_settings(DEFAULT_CONFIG_PATH)
+except (FileNotFoundError, ValueError) as e:
+    print(f"Failed to load settings: {e}")
+    sys.exit(1)
+    
         
 # Desired wavelength range in nanometers
 wl_range_nm = settings['wl_range_nm']
