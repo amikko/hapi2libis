@@ -48,7 +48,7 @@ def load_settings(config_path=None):
         if len(sys.argv) > 1:
             config_path = sys.argv[1]
         else:
-            print('No settings file given as argument for HAPI2LIBIS.')
+            print("No settings file given as argument for HAPI2LIBIS.")
             print("Trying to load default settings file: config.yaml")
             config_path = 'config.yaml'
     
@@ -144,26 +144,42 @@ atmosphere_dict = {1:'afglms', # midlatitude summer
                    }
 
 def load_default_atmosphere():
+    """Load standard atmosphere profile from libRadtran data."""
     
-    atm_file = '{}/data/atmmod/{}.dat'.format(libradtranpath, atmosphere_dict[atmosphere_id])
+    # atm_file = '{}/data/atmmod/{}.dat'.format(libradtranpath, atmosphere_dict[atmosphere_id])
+    atm_file = Path(libradtranpath) / "data" / "atmmod" / f"{atmosphere_dict[atmosphere_id]}.dat"
+    
     # header = ['z(km)', 'p(mb)', 'T(K)', 'air(cm-3)', 'o3(cm-3)', 'o2(cm-3)', 'h2o(cm-3)', 'co2(cm-3)', 'no2(cm-3)']
     # atm_df = pd.read_csv(atm_file, sep='\s+', comment='#', names=header)
+    if not atm_file.exists():
+        error_text = f"""Atmosphere file not found in: {atm_file}\n
+        Please check the libradtran path or set atmosphere to 'custom' if you want to run HAPI2LIBIS without libRadtran."""
+        raise FileNotFoundError(error_text)
+
     atm_arr = np.loadtxt(atm_file, comments='#')
     
     if load_aux_gases_from_us_standard:
-        afglus_files = [f'{libradtranpath}/data/atmmod/afglus_ch4_vmr.dat',
-                        f'{libradtranpath}/data/atmmod/afglus_n2o_vmr.dat',
-                        f'{libradtranpath}/data/atmmod/afglus_co_vmr.dat',
-                        f'{libradtranpath}/data/atmmod/afglus_n2_vmr.dat']
+        afglus_files = [Path(libradtranpath) / "data" / "atmmod" / "afglus_ch4_vmr.dat",
+                        Path(libradtranpath) / "data" / "atmmod" / "afglus_n2o_vmr.dat",
+                        Path(libradtranpath) / "data" / "atmmod" / "afglus_co_vmr.dat",
+                        Path(libradtranpath) / "data" / "atmmod" / "afglus_n2_vmr.dat"]
     
         for aux_file_idx in afglus_files:
+            if not aux_file_idx.exists():
+                error_text = f"""Auxiliary US-standard file not found in: {atm_file}\n
+                This file should come with the standard libRadtran installation."""
+                raise FileNotFoundError(error_text)
             aux_gas = np.loadtxt(aux_file_idx, comments='#')
-            assert np.isclose(aux_gas[:, 0], atm_arr[:, 0]).all()
+            
+            if not np.allclose(aux_gas[:, 0], atm_arr[:, 0]):
+                raise ValueError(f"Altitude mismatch in: {aux_file_idx}")
+            # assert np.isclose(aux_gas[:, 0], atm_arr[:, 0]).all()
+            
             # Unit conversion
             aux_gas[:, 1] *= atm_arr[:, 3]
+            
             atm_arr = np.hstack((atm_arr, aux_gas[:, 1][:, None]))
     return atm_arr
-
 
 # Load atmosphere
 if atmosphere_id in range(1, 7):
@@ -171,13 +187,16 @@ if atmosphere_id in range(1, 7):
     # Numbers correspond to columns in atm file
     atm_col_id_dict = {'altitude': 0, 'pressure': 1, 'temperature': 2, 'air': 3,
                        'O3': 4, 'O2': 5, 'H2O': 6, 'CO2': 7, 'NO2': 8, 
-                       'CH4': 9, 'N2O': 10, 'CO': 11,'N2': 12}
+                       'CH4': 9, 'N2O': 10, 'CO': 11, 'N2': 12}
 elif atmosphere_id == 'custom':
     atm_arr = np.loadtxt(atmosphere_dict['custom']['filepath'], comments='#')
     atm_col_id_dict = atmosphere_dict['custom']['col_ids']
 else:
     raise Exception(f"INCORRECT 'atmosphere_id': {atmosphere_id}")
 
+##############################################################################
+### HAPI SETUP ###
+##############################################################################
 
 function_listing = {'Lorentz' : hapi.absorptionCoefficient_Lorentz,
                     'Doppler' : hapi.absorptionCoefficient_Doppler,
