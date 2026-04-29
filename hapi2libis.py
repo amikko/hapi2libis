@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# HAPI2LIBIS v1.0.0-dev
+
 # Authors: Antti Kukkurainen1 & Antti Mikkonen1
 # 1: Finnish Meteorological Institute
 # Correspondence: antti.kukkurainen@fmi.fi
+
+# HAPI2LIBIS v1.0.0-dev
+"""Changelog:
+- Modified function 'load_default_atmosphere' to use pathlib. This change should
+be applied to other paths as well to maintain compatibility between OSs.
+- Added exceptions to 'load_default_atmosphere' if files missing.
+- Moved settings loading to a new function and added option to change default path.
+- Added comment blocks for easier navigation.
+- Fixed bug in 'nitrogen_oxide_cross_section' when using table id 'bogumil_exp'.
+
+"""
 
 import os
 import sys
@@ -603,6 +614,71 @@ def database_interpolation(gas,wn_min,wn_max,wn_step,T,P,Ps):
     else:
         return wn, None
 
+##############################################################################
+### TABLE GAS CROSS-SECTIONS ###
+##############################################################################
+
+def ozone_cross_section(wavelength, temperature, data):
+    """Compute O3 cross-section from lookup table."""
+    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
+        print("Warning! Requested wavelength is outside the table wavelength range for O3!")
+    
+    C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
+    C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
+    C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
+    
+    T = temperature
+    table_id = crs_table_gases['O3']['id']
+    
+    if table_id in ['molina', 'bass_and_paur', 'daumount']:
+        T0 = 273.13
+        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+    elif table_id in ['bogumil', 'bogumil_exp']:
+        T0 = 273.15
+        if table_id == 'bogumil_exp':
+            # Alternative equation from Bogumil et al. 2003
+            sigma = (C0_interp * np.exp( - C1_interp*T + C2_interp/T)) * 1.E-20
+        else:
+            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+    else:
+        raise KeyError("Oops! Unknown table id!")
+    
+    return sigma
+
+def nitrogen_oxide_cross_section(wavelength, temperature, data):
+    """Compute NO2 cross-section from lookup table."""
+    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
+        print("Warning! Requested wavelength is outside the table wavelength range for NO2!")
+        
+    table_id = crs_table_gases['NO2']['id']
+    
+    if table_id in ['burrows', 'schneider']:
+        sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
+    elif table_id in ['bogumil', 'bogumil_exp']:
+        T0 = 273.15
+        T = temperature
+        C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
+        C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
+        C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
+        
+        if table_id == 'bogumil_exp':
+            # Alternative equation from Bogumil et al. 2003
+            sigma = (C0_interp * np.exp(-C1_interp*T + C2_interp/T)) * 1.E-20
+        else:
+            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+    else:
+        raise KeyError('Oops! Unknown table id!')
+    return sigma
+
+def oxygen_dimer(wavelength, data):
+    """Compute O2-O2 cross-section from lookup table."""
+    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
+        print("Warning! Requested wavelength is outside the table wavelength range for O2-O2!")
+    sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
+    return sigma
+
+
+#%%
 
 # Fetch gases from HITRAN
 fetched_gases = []
@@ -621,60 +697,6 @@ for gas in gas_dict:
         
 
 lookup_table_gases = []
-
-def ozone_cross_section(wavelength, temperature, data):
-    
-    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range!")
-    
-    C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
-    C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
-    
-    T = temperature
-    
-    if crs_table_gases['O3']['id'] in ['molina', 'bass_and_paur', 'daumount']:
-        T0 = 273.13
-        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    elif crs_table_gases['O3']['id'] in ['bogumil', 'bogumil_exp']:
-        T0 = 273.15
-        if crs_table_gases['O3']['id'] == 'bogumil_exp':
-            # Alternative equation from Bogumil et al. 2003
-            sigma = (C0_interp * np.exp( - C1_interp*T + C2_interp/T)) * 1.E-20
-        else:
-            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    else:
-        raise Exception('Oops! Unknown table id!')
-    
-    return sigma
-
-def nitrogen_oxide_cross_section(wavelength, temperature, data):
-    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range!")
-    
-    if crs_table_gases['NO2']['id'] in ['burrows', 'schneider']:
-        sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    elif crs_table_gases['NO2']['id'] in ['bogumil', 'bogumil_exp']:
-        T0 = 273.15
-        T = temperature
-        C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-        C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
-        C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
-        if crs_table_gases['O3']['id'] == 'bogumil_exp':
-            # Alternative equation from Bogumil et al. 2003
-            sigma = (C0_interp * np.exp( - C1_interp*T + C2_interp/T)) * 1.E-20
-        else:
-            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    else:
-        raise Exception('Oops! Unknown table id!')
-    return sigma
-
-def oxygen_dimer(wavelength, data):
-    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range!")
-    sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    return sigma
-
 
 # Check that table gases are not downloaded by HAPI
 for crs_table_gas_id in crs_table_gases:
