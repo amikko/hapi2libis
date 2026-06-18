@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Authors: Antti Kukkurainen1 & Antti Mikkonen1
+# Authors: Antti Kukkurainen1 & Amanita Mikkonen1
 # 1: Finnish Meteorological Institute
 # Correspondence: antti.kukkurainen@fmi.fi
 
