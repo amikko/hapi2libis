@@ -1,5 +1,5 @@
 # HAPI2LIBIS
-Authors: Antti Kukkurainen<sup>1</sup> & Antti Mikkonen<sup>1</sup>\
+Authors: Antti Kukkurainen<sup>1</sup> & Amanita Mikkonen<sup>1</sup>\
 1: Finnish Meteorological Institute\
 Correspondence: antti.kukkurainen@fmi.fi
 
