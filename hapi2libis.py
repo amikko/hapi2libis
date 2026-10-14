@@ -359,7 +359,7 @@ def setup_file(subst, wn, filename):
 
 def filenamefun(subst, wn_min, wn_max, wn_reso, function_choice):
     """Generate database filename."""
-    return folder_csdb() / '%s_%f_%f_%f_%s.nc' % (subst,wn_min,wn_max,wn_reso,function_choice)
+    return folder_csdb() / str('%s_%f_%f_%f_%s.nc' % (subst,wn_min,wn_max,wn_reso,function_choice))
 
 def input_xsec_data(subst, T, P, Ps, wn_min, wn_max, wn_reso, wn, xsec):
     """
@@ -513,7 +513,7 @@ def compute_dimension_scaling(subst, wn_min, wn_max, wn_reso):
     # at least, there is no guarantee of unique minimum for W with particular point cloud.
     # This approach should be set onto the backburner and instead of use the weights W
     # by scaling each of the dimensions with max(dim) - min(dim)
-    filename = filenamefun(subst, wn_min, wn_max, wn_reso, function_choice)
+    filename = filenamefun(subst,wn_min,wn_max,wn_reso,function_choice)
     Tvals, Pvals, Psvals, wn, xsec, W = load_xsec_data(subst, [wn_min,wn_max], wn_reso)
     max_vals = [np.max(Tvals), np.max(Pvals), np.max(Psvals)]
     Tvals = Tvals / max_vals[0]
@@ -750,7 +750,7 @@ if crs_table_gases['NO2']['use']:
     
     table_file = table_NO2_paths[crs_table_gases['NO2']['id']]
     if table_file.exists():
-        crs_table_gases['NO2']['use'] = np.loadtxt(table_file, comments='#')
+        crs_table_gases['NO2']['data'] = np.loadtxt(table_file, comments='#')
     else:
         raise FileNotFoundError(f"Could not found table file for NO2 in: {table_file}")
     
