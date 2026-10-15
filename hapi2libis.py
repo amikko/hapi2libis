@@ -16,6 +16,13 @@ be applied to other paths as well to maintain compatibility between OSs.
 - Added wavelength initialization so if only table gases are used, code doesn't crash.
 - Added pathlib to other paths.
 - Changed table gas computation to use general "sigma" term
+- Fixed crash when writing the output file if only table gases are used.
+- Fixed raise of a plain string in database_interpolation.
+- Unknown interpolation_method now raises an error.
+- Fixed bracket in find_smallest_box_bf.
+- Fixed wrong file path in the auxiliary-file error message.
+- Fixed possibility for a negative volume box 
+- Added warning when gas is skipped
 
 """
 
@@ -183,7 +190,7 @@ def load_default_atmosphere():
     
         for aux_file_idx in afglus_files:
             if not aux_file_idx.exists():
-                error_text = f"""Auxiliary US-standard file not found in: {atm_file}\n
+                error_text = f"""Auxiliary US-standard file not found in: {aux_file_idx}\n
                 This file should come with the standard libRadtran installation."""
                 raise FileNotFoundError(error_text)
             aux_gas = np.loadtxt(aux_file_idx, comments='#')
@@ -453,7 +460,7 @@ def find_smallest_box_bf(x, p, W):
         for j in range(0, i):
             if is_inside_box(x, p[:,i], p[:,j]):
                 boxes.append((i, j))
-                measures.append(box_volume(p[:,i], p[:,j]), W)
+                measures.append(box_volume(p[:,i], p[:,j], W))
     if not boxes:
         return(-1, find_closest_element(x, p, W))
     else:
@@ -506,6 +513,8 @@ if interpolation_method == 'bounding-box':
     interpolate = interpolate_bounding_box
 elif interpolation_method == 'nearest-neighbour':
     interpolate = interpolate_nearest_neighbour
+else:
+    raise ValueError(f"Unknown interpolation_method: '{interpolation_method}'")
 
 def compute_dimension_scaling(subst, wn_min, wn_max, wn_reso):
     # TODO: Should other W-elements be fitted too? It could boost the interpolation?
@@ -591,7 +600,7 @@ def database_interpolation(gas, wn_min, wn_max, wn_step, T, P, Ps):
                     elif interpolation_method == 'bounding-box':
                         (i,j) = find_smallest_box(x, TPPs, cl_interp_p, W)
                         box_space_diagonal_ = TPPs[:,i] - TPPs[:,j]
-                        box_space_diagonal = box_space_diagonal_ * np.sqrt(W)
+                        box_space_diagonal = np.abs(box_space_diagonal_) * np.sqrt(W)
                         box_vol = np.prod(box_space_diagonal)
                         if box_vol > interpolation_error_tolerance:
                             i = -1
@@ -603,7 +612,7 @@ def database_interpolation(gas, wn_min, wn_max, wn_step, T, P, Ps):
                         if np.linalg.norm(x - TPPs[:,i]) > interpolation_error_tolerance:
                             i = -1
                     else:
-                        raise("No interpolation method '%s'" % interpolation_method)
+                        raise ValueError("No interpolation method '%s'" % interpolation_method)
             else: #if there's no data yet
                 i = -1
 
@@ -709,7 +718,9 @@ def fetch_lines(gas_fetch, nu_min, nu_max):
     try:
         hapi.fetch_by_ids(gas_fetch, gas_dict[gas_fetch], nu_min, nu_max)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"\nWARNING! Could not fetch {gas_fetch} lines from HITRAN: {e}")
+        print(f"{gas_fetch} is left out of the computation!")
         return False
 
 for gas in gas_dict:
@@ -871,9 +882,9 @@ if __name__ == '__main__':
                                                             'p':pressure_middle},
                                                HITRAN_units=True)
                 if use_xsec_db:
-                    input_xsec_data(compute_gas,np.array([temp_middle]),
-                        np.array([pressure_middle]),np.array([diluent_dict[compute_gas]]),
-                        nu_min,nu_max,nu_resolution,nu_high,coef_high)
+                    input_xsec_data(compute_gas, np.array([temp_middle]),
+                        np.array([pressure_middle]), np.array([diluent_dict[compute_gas]]),
+                        nu_min, nu_max, nu_resolution, nu_high, coef_high)
             abs_coef += coef_high * gas_concentration_dict[compute_gas]
             
             
@@ -939,7 +950,7 @@ if __name__ == '__main__':
             # Dimensions
             nc.createDimension('nlev', len(altitude))
             nc.createDimension('nlyr', len(altitude) - 1)
-            nc.createDimension('nwvl', len(coef_high))
+            nc.createDimension('nwvl', len(nu_high))
         
             # Variables
             nc_wvlmin = nc.createVariable('wvlmin','f8',())
