@@ -23,6 +23,7 @@ be applied to other paths as well to maintain compatibility between OSs.
 - Fixed wrong file path in the auxiliary-file error message.
 - Fixed possibility for a negative volume box 
 - Added warning when gas is skipped
+- Modified fetch_lines function to retry on connection failure.
 
 """
 
@@ -664,7 +665,7 @@ def ozone_cross_section(wavelength, temperature, data):
         else:
             sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
     else:
-        raise KeyError("Oops! Unknown table id!")
+        raise KeyError(f"Oops! Unknown table id for O3: {table_id}")
     
     return sigma
 
@@ -690,7 +691,7 @@ def nitrogen_oxide_cross_section(wavelength, temperature, data):
         else:
             sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
     else:
-        raise KeyError('Oops! Unknown table id!')
+        raise KeyError(f"Oops! Unknown table id for NO2: {table_id}")
     return sigma
 
 def oxygen_dimer(wavelength, data):
@@ -706,22 +707,41 @@ def oxygen_dimer(wavelength, data):
 
 # Fetch gases from HITRAN
 fetched_gases = []
-def fetch_lines(gas_fetch, nu_min, nu_max):
+
+def fetch_lines(gas_fetch, nu_min, nu_max, max_attempts=3, wait_s=10):
     """
     Fetch spectral lines for a gas from HITRAN.
-    
+
+    A gas with no lines in the wavenumber range is skipped. Any other
+    failure (e.g. no connection) is retried and then stops the run.
+
     Returns:
-        bool: True if successful, False otherwise.
+        bool: True if successful, False if HITRAN has no lines for the gas.
     """
+    for attempt in range(1, max_attempts + 1):
+        # Try to load gases and ignore a gas if HITRAN returns nothing
+        try:
+            hapi.fetch_by_ids(gas_fetch, gas_dict[gas_fetch], nu_min, nu_max)
+            return True
+        except Exception as e:
+            # Currently, HAPI gives this message when HITRAN has no lines in the range
+            # TODO: Check if this behaviour changes in newer HAPI versions
+            if 'Failed to retrieve data' in str(e):
+                print(f"\nWARNING! No {gas_fetch} lines found in HITRAN for the given range.")
+                print(f"{gas_fetch} is left out of the computation!")
+                return False
+            print(f"\nCould not fetch {gas_fetch} lines from HITRAN "
+                  f"(attempt {attempt}/{max_attempts}): {e}")
+            if attempt < max_attempts:
+                print(f"Retrying in {wait_s} s...")
+                time.sleep(wait_s)
+    print(f"\nERROR! Could not fetch {gas_fetch} lines from HITRAN after "
+          f"{max_attempts} attempts. Please check internet connection. "
+          "Stopping HAPI2LIBIS!")
+    sys.exit(1)        
+
     
-    # Try to load gases and ignore a gas if HITRAN returns nothing
-    try:
-        hapi.fetch_by_ids(gas_fetch, gas_dict[gas_fetch], nu_min, nu_max)
-        return True
-    except Exception as e:
-        print(f"\nWARNING! Could not fetch {gas_fetch} lines from HITRAN: {e}")
-        print(f"{gas_fetch} is left out of the computation!")
-        return False
+    
 
 for gas in gas_dict:
     if fetch_lines(gas, nu_min, nu_max):
@@ -751,7 +771,7 @@ if crs_table_gases['O3']['use']:
     if table_file.exists():
         crs_table_gases['O3']['data'] = np.loadtxt(table_file, comments='#')
     else:
-        raise FileNotFoundError(f"Could not found table file for O3 in: {table_file}")
+        raise FileNotFoundError(f"Could not find table file for O3 in: {table_file}")
     
 if crs_table_gases['NO2']['use']:
     table_NO2_paths = {
@@ -763,7 +783,7 @@ if crs_table_gases['NO2']['use']:
     if table_file.exists():
         crs_table_gases['NO2']['data'] = np.loadtxt(table_file, comments='#')
     else:
-        raise FileNotFoundError(f"Could not found table file for NO2 in: {table_file}")
+        raise FileNotFoundError(f"Could not find table file for NO2 in: {table_file}")
     
 if crs_table_gases['O2-O2']['use']:    
     table_O2_O2_paths = {
@@ -773,7 +793,7 @@ if crs_table_gases['O2-O2']['use']:
     if table_file.exists():
         crs_table_gases['O2-O2']['data'] = np.loadtxt(table_file)
     else:
-        raise FileNotFoundError(f"Could not found table file for O2-O2 in: {table_file}")
+        raise FileNotFoundError(f"Could not find table file for O2-O2 in: {table_file}")
 
 
 ##############################################################################
