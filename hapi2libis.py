@@ -767,6 +767,9 @@ if crs_table_gases['O3']['use']:
         'bogumil': Path(libradtranpath) / "data" / "crs" / "crs_O3_UBremen_cf.dat",
         }
     
+    if crs_table_gases['O3']['id'] not in table_O3_paths:
+        raise KeyError(f"Oops! Unknown table id for O3: {crs_table_gases['O3']['id']}")
+    
     table_file = table_O3_paths[crs_table_gases['O3']['id']]
     if table_file.exists():
         crs_table_gases['O3']['data'] = np.loadtxt(table_file, comments='#')
@@ -779,6 +782,9 @@ if crs_table_gases['NO2']['use']:
         'bogumil': Path(libradtranpath) / "data" / "crs" / "crs_NO2_UBremen_cf.dat", 
         'schneider': Path(libradtranpath) / "data" / "crs" / "crs_no2_012.dat"}
     
+    if crs_table_gases['NO2']['id'] not in table_NO2_paths:
+        raise KeyError(f"Oops! Unknown table id for NO2: {crs_table_gases['NO2']['id']}")
+    
     table_file = table_NO2_paths[crs_table_gases['NO2']['id']]
     if table_file.exists():
         crs_table_gases['NO2']['data'] = np.loadtxt(table_file, comments='#')
@@ -789,6 +795,9 @@ if crs_table_gases['O2-O2']['use']:
     table_O2_O2_paths = {
         'greenblatt': Path(libradtranpath) / "data" / "crs" / "crs_o4_greenblatt.dat"}
     
+    if crs_table_gases['O2-O2']['id'] not in table_O2_O2_paths:
+        raise KeyError(f"Oops! Unknown table id for O2-O2: {crs_table_gases['O2-O2']['id']}")
+        
     table_file = table_O2_O2_paths[crs_table_gases['O2-O2']['id']]
     if table_file.exists():
         crs_table_gases['O2-O2']['data'] = np.loadtxt(table_file)
