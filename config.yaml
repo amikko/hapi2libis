@@ -7,7 +7,7 @@
 ##############################################################################
 
 # Location of main libRadtran folder.
-libradtranpath: '/home/kukkurai/bin/libRadtran-2.0.5'
+libradtranpath: '/home/kukkurai/bin/libRadtran-2.0.6'
 # libradtranpath: '/home/mikkonea/Projects/arsca-suite/rt_solvers/libradtran/libRadtran-2.0.5'
 
 # Desired wavelength range in nanometers.
@@ -74,10 +74,10 @@ check_wavelength_limits: True
 crs_table_gases: 
     'O3': 
         'use': True
-        'id': 'molina' # molina; bass_and_paur, daumount, bogumil, bogumil_exp
+        'id': 'molina' # molina; bass_and_paur, daumount, bogumil
     'NO2':
         'use': True
-        'id': 'burrows' # burrows; bogumil, schneider, bogumil_exp
+        'id': 'burrows' # burrows; bogumil, schneider
     'O2-O2': 
         'use': True
         'id': 'greenblatt' # greenblatt
