@@ -657,13 +657,9 @@ def ozone_cross_section(wavelength, temperature, data):
     if table_id in ['molina', 'bass_and_paur', 'daumount']:
         T0 = 273.13
         sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    elif table_id in ['bogumil', 'bogumil_exp']:
+    elif table_id == 'bogumil':
         T0 = 273.15
-        if table_id == 'bogumil_exp':
-            # Alternative equation from Bogumil et al. 2003
-            sigma = (C0_interp * np.exp( - C1_interp*T + C2_interp/T)) * 1.E-20
-        else:
-            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
     else:
         raise KeyError(f"Oops! Unknown table id for O3: {table_id}")
     
@@ -678,18 +674,14 @@ def nitrogen_oxide_cross_section(wavelength, temperature, data):
     
     if table_id in ['burrows', 'schneider']:
         sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    elif table_id in ['bogumil', 'bogumil_exp']:
+    elif table_id == 'bogumil':
         T0 = 273.15
         T = temperature
         C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
         C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
         C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
         
-        if table_id == 'bogumil_exp':
-            # Alternative equation from Bogumil et al. 2003
-            sigma = (C0_interp * np.exp(-C1_interp*T + C2_interp/T)) * 1.E-20
-        else:
-            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
     else:
         raise KeyError(f"Oops! Unknown table id for NO2: {table_id}")
     return sigma
