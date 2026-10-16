@@ -1,35 +1,82 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# HAPI2LIBIS v1.0
-# Authors: Antti Kukkurainen1 & Antti Mikkonen1
+
+# Authors: Antti Kukkurainen1 & Amanita Mikkonen1
 # 1: Finnish Meteorological Institute
 # Correspondence: antti.kukkurainen@fmi.fi
 
+# HAPI2LIBIS v1.1.0
+
+
+import sys
+import time
+from pathlib import Path
 
 import hapi
+import numpy as np
+import yaml
+import netCDF4
+from netCDF4 import Dataset
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
-import numpy as np
-from netCDF4 import Dataset
-import os
-import netCDF4
-import time
-import yaml
-import sys
     
-try:
-    with open(sys.argv[1], 'r') as settings_file:
-        settings = yaml.safe_load(settings_file)  
-    print(f"Settings loaded from file: {sys.argv[1]}\n")
+# Set new default YAML config path or None to use "config.yaml"
+DEFAULT_CONFIG_PATH = None
 
-except(IndexError):
-    print('\nNo settings file given for HAPI2LIBIS!')
-    print("Trying to load default settings file: config.yaml")
+##############################################################################
+### CONFIGURATION ###
+##############################################################################
+
+def load_settings(config_path=None):
+    """
+    Load  configuration from YAML file.
+
+    Parameters
+    ----------
+    config_path : str, optional
+        Path to config file. If None, tries command-line argument sys.argv.[1]
+        then "config.yaml". The default is None.
+
+    Returns
+    -------
+    settings : dict
+        Configuration settings.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no valid config file found.
+    ValueError
+        If invalid value encountered in the settings file.
+    """
     
-    with open('config.yaml', 'r') as settings_file:
-        settings = yaml.safe_load(settings_file)  
+    if config_path is None:
+        if len(sys.argv) > 1:
+            config_path = sys.argv[1]
+        else:
+            print("No settings file given as argument for HAPI2LIBIS.")
+            print("Trying to load default settings file: config.yaml")
+            config_path = 'config.yaml'
     
-    print("Settings loaded!\n")
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    try:
+        with open(config_file, 'r') as f:
+            settings = yaml.safe_load(f)  
+        print(f"Settings loaded from file: {config_path}")
+        return settings
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in config file: {e}")
+    
+# Load settings from YAML file
+try:
+    settings = load_settings(DEFAULT_CONFIG_PATH)
+except (FileNotFoundError, ValueError) as e:
+    print(f"Failed to load settings: {e}")
+    sys.exit(1)
+    
         
 # Desired wavelength range in nanometers
 wl_range_nm = settings['wl_range_nm']
@@ -89,9 +136,9 @@ interpolation_method = settings['interpolation_method']
 # for interpolation, or the maximum distance from particular point
 interpolation_error_tolerance = settings['interpolation_error_tolerance']
 
-###-------------------------------------------------------------------------###
-###-------------------------------------------------------------------------###
-###-------------------------------------------------------------------------###
+##############################################################################
+### ATMOSPHERE SETUP ###
+##############################################################################
 
 atmosphere_dict = {1:'afglms', # midlatitude summer
                    2:'afglmw', # midlatitude winter
@@ -103,26 +150,42 @@ atmosphere_dict = {1:'afglms', # midlatitude summer
                    }
 
 def load_default_atmosphere():
+    """Load standard atmosphere profile from libRadtran data."""
     
-    atm_file = '{}/data/atmmod/{}.dat'.format(libradtranpath, atmosphere_dict[atmosphere_id])
+    # atm_file = '{}/data/atmmod/{}.dat'.format(libradtranpath, atmosphere_dict[atmosphere_id])
+    atm_file = Path(libradtranpath) / "data" / "atmmod" / f"{atmosphere_dict[atmosphere_id]}.dat"
+    
     # header = ['z(km)', 'p(mb)', 'T(K)', 'air(cm-3)', 'o3(cm-3)', 'o2(cm-3)', 'h2o(cm-3)', 'co2(cm-3)', 'no2(cm-3)']
     # atm_df = pd.read_csv(atm_file, sep='\s+', comment='#', names=header)
+    if not atm_file.exists():
+        error_text = f"""Atmosphere file not found in: {atm_file}\n
+        Please check the libradtran path or set atmosphere to 'custom' if you want to run HAPI2LIBIS without libRadtran."""
+        raise FileNotFoundError(error_text)
+
     atm_arr = np.loadtxt(atm_file, comments='#')
     
     if load_aux_gases_from_us_standard:
-        afglus_files = [f'{libradtranpath}/data/atmmod/afglus_ch4_vmr.dat',
-                        f'{libradtranpath}/data/atmmod/afglus_n2o_vmr.dat',
-                        f'{libradtranpath}/data/atmmod/afglus_co_vmr.dat',
-                        f'{libradtranpath}/data/atmmod/afglus_n2_vmr.dat']
+        afglus_files = [Path(libradtranpath) / "data" / "atmmod" / "afglus_ch4_vmr.dat",
+                        Path(libradtranpath) / "data" / "atmmod" / "afglus_n2o_vmr.dat",
+                        Path(libradtranpath) / "data" / "atmmod" / "afglus_co_vmr.dat",
+                        Path(libradtranpath) / "data" / "atmmod" / "afglus_n2_vmr.dat"]
     
         for aux_file_idx in afglus_files:
+            if not aux_file_idx.exists():
+                error_text = f"""Auxiliary US-standard file not found in: {aux_file_idx}\n
+                This file should come with the standard libRadtran installation."""
+                raise FileNotFoundError(error_text)
             aux_gas = np.loadtxt(aux_file_idx, comments='#')
-            assert np.isclose(aux_gas[:, 0], atm_arr[:, 0]).all()
+            
+            if not np.allclose(aux_gas[:, 0], atm_arr[:, 0]):
+                raise ValueError(f"Altitude mismatch in: {aux_file_idx}")
+            # assert np.isclose(aux_gas[:, 0], atm_arr[:, 0]).all()
+            
             # Unit conversion
             aux_gas[:, 1] *= atm_arr[:, 3]
+            
             atm_arr = np.hstack((atm_arr, aux_gas[:, 1][:, None]))
     return atm_arr
-
 
 # Load atmosphere
 if atmosphere_id in range(1, 7):
@@ -130,13 +193,16 @@ if atmosphere_id in range(1, 7):
     # Numbers correspond to columns in atm file
     atm_col_id_dict = {'altitude': 0, 'pressure': 1, 'temperature': 2, 'air': 3,
                        'O3': 4, 'O2': 5, 'H2O': 6, 'CO2': 7, 'NO2': 8, 
-                       'CH4': 9, 'N2O': 10, 'CO': 11,'N2': 12}
+                       'CH4': 9, 'N2O': 10, 'CO': 11, 'N2': 12}
 elif atmosphere_id == 'custom':
     atm_arr = np.loadtxt(atmosphere_dict['custom']['filepath'], comments='#')
     atm_col_id_dict = atmosphere_dict['custom']['col_ids']
 else:
     raise Exception(f"INCORRECT 'atmosphere_id': {atmosphere_id}")
 
+##############################################################################
+### HAPI SETUP ###
+##############################################################################
 
 function_listing = {'Lorentz' : hapi.absorptionCoefficient_Lorentz,
                     'Doppler' : hapi.absorptionCoefficient_Doppler,
@@ -226,19 +292,18 @@ for g in selected_gases:
 
 # fetch_by_ids is easier to use when we want multiple isotopes
 
-# --------------------------------
-# The cross-section database stuff
-# --------------------------------
-
+##############################################################################
+### CROSS-SECTION DATABASE UTILITIES ###
+##############################################################################
 
 def folder_csdb():
-    return xsec_db_folder + '/'
+    return Path(xsec_db_folder)
 
 def if_folder_not_exist_then_create(folder_path):
-    if not os.path.isdir(folder_path):
-        os.mkdir(folder_path)
+    """Create directory if it doesn't exist."""
+    Path(folder_path).mkdir(parents=True, exist_ok=True)
 
-def setup_file(subst,wn,filename):
+def setup_file(subst, wn, filename):
     """
     This function sets up a netCDF4 datafile for cross-sections of substance
     subst for wavenumbers wn.
@@ -249,8 +314,9 @@ def setup_file(subst,wn,filename):
 
     if_folder_not_exist_then_create(folder_csdb())
 
-    if os.path.isfile(filename):
+    if Path.is_file(filename):
         return
+    
     print("Creating new file '%s'..." % filename)
     with netCDF4.Dataset(filename, 'w', format="NETCDF4") as ds:
     
@@ -262,7 +328,7 @@ def setup_file(subst,wn,filename):
         #the dimensions are set to a variable for clarity of the nc data structure
         dim_tpps_idx = ds.createDimension('TPPs_index', 0)
         dim_wl = ds.createDimension('wavenumber', len_wn)
-        dim_cubic = ds.createDimension('dim_scale',3)
+        dim_cubic = ds.createDimension('dim_scale', 3)
     
         var_xsec = ds.createVariable('cross_section', 'f4' , ('TPPs_index','wavenumber',))
         var_T = ds.createVariable('temperature', 'f4' , ('TPPs_index',))
@@ -272,7 +338,7 @@ def setup_file(subst,wn,filename):
         var_dim = ds.createVariable('dimension_scaling', 'f4', ('dim_scale',))
     
         var_wn[:] = wn
-        var_dim[:] = np.array([1,1,1])
+        var_dim[:] = np.array([1, 1, 1])
     
         var_xsec.units = 'cm^2'
         var_T.units = 'K'
@@ -280,18 +346,22 @@ def setup_file(subst,wn,filename):
         var_ps.units = 'atm'
         var_wn.units = '1/cm'
 
-def filenamefun(subst,wn_min,wn_max,wn_reso,function_choice):
-    return folder_csdb() + '%s_%f_%f_%f_%s.nc' % (subst,wn_min,wn_max,wn_reso,function_choice)
-def input_xsec_data(subst,T,P,Ps,wn_min,wn_max,wn_reso,wn,xsec):
+def filenamefun(subst, wn_min, wn_max, wn_reso, function_choice):
+    """Generate database filename."""
+    return folder_csdb() / str('%s_%f_%f_%f_%s.nc' % (subst,wn_min,wn_max,wn_reso,function_choice))
+
+def input_xsec_data(subst, T, P, Ps, wn_min, wn_max, wn_reso, wn, xsec):
     """
-    Appends the data xsec(TPPs,wn) into the file basename_subst.nc.
+    Appends the data xsec(TPPs, wn) into the file basename_subst.nc.
     """
-    filename = filenamefun(subst,wn_min,wn_max,wn_reso,function_choice)
-    if not os.path.isfile(filename):
+    filename = filenamefun(subst, wn_min, wn_max, wn_reso, function_choice)
+    
+    if not Path.is_file(filename):
         print("File '%s' not found! Setting up..." % filename)
-        setup_file(subst,wn,filename)
+        setup_file(subst, wn, filename)
+        
     with netCDF4.Dataset(filename, 'a', format="NETCDF4") as ds:
-        assert np.isclose(wn,ds['wavenumber']).all(), ("The wavenumbers 'wn' " +
+        assert np.isclose(wn, ds['wavenumber']).all(), ("The wavenumbers 'wn' " +
         "aren't all equal with the ones in the file %s!" % filename)
         TPPs_len = T.size
         ds_len = ds['cross_section'].shape[0]
@@ -302,17 +372,19 @@ def input_xsec_data(subst,T,P,Ps,wn_min,wn_max,wn_reso,wn,xsec):
         ds['pressure'][start_idx : end_idx] = P
         ds['partial_pressure'][start_idx : end_idx] = Ps
         ds['cross_section'][start_idx : end_idx, :] = xsec
-        weights = np.array([(np.max(ds['temperature'][:]) - np.min(ds['temperature'][:])) ** -2,
-                              (np.max(ds['pressure'][:]) - np.min(ds['pressure'][:])) ** -2,
-                              (np.max(ds['partial_pressure'][:]) - np.min(ds['partial_pressure'][:])) ** -2])
+        weights = np.array([
+            (np.max(ds['temperature'][:]) - np.min(ds['temperature'][:])) ** -2,
+            (np.max(ds['pressure'][:]) - np.min(ds['pressure'][:])) ** -2,
+            (np.max(ds['partial_pressure'][:]) - np.min(ds['partial_pressure'][:])) ** -2
+            ])
         ds['dimension_scaling'][:] = weights
 
-def load_xsec_data(subst,wn_range,wn_step):
+def load_xsec_data(subst, wn_range, wn_step):
     """
     Loads all xsec-data from the file basename_subst.nc
     """
-    filename = filenamefun(subst,wn_range[0],wn_range[1],wn_step,function_choice)
-    if not os.path.isfile(filename):
+    filename = filenamefun(subst, wn_range[0], wn_range[1], wn_step, function_choice)
+    if not Path.is_file(filename):
         print("File '%s' not found! Computing all the cross-sections..." % filename)
         return (None, None, None, None, None, None)
     with netCDF4.Dataset(filename, 'r', format="NETCDF4") as ds:
@@ -324,18 +396,18 @@ def load_xsec_data(subst,wn_range,wn_step):
         xsec = ds['cross_section'][:].data
         W = ds['dimension_scaling'][:].data
 
-    return (T,P,Ps,wn,xsec,W)
+    return (T, P, Ps, wn, xsec, W)
 
 # -----------------------------------------
 # The interpolation scheme for the database
 # -----------------------------------------
 
-def is_inside_box(x,a,b):
+def is_inside_box(x, a, b):
     """
     This function checks if x is within an n-box defined by a and b as its
     vertices.
     """
-    ab = np.array([a,b])
+    ab = np.array([a, b])
     min_corner = ab.min(0)
     max_corner = ab.max(0)
     return np.all(x <= max_corner) and np.all(min_corner <= x)
@@ -353,8 +425,8 @@ def find_closest_element(x, p, W):
     dists = get_distances(x, p, W)
     return np.argmin(dists)
 
-def box_volume(a,b,W):
-    return np.prod(np.multiply(np.absolute(a - b),W))
+def box_volume(a, b, W):
+    return np.prod(np.multiply(np.absolute(a - b), W))
 
 def find_smallest_box_bf(x, p, W):
     """
@@ -366,13 +438,13 @@ def find_smallest_box_bf(x, p, W):
     n = p.shape[1]
     boxes = []
     measures = []
-    for i in range(0,n):
-        for j in range(0,i):
-            if is_inside_box(x,p[:,i],p[:,j]):
-                boxes.append((i,j))
-                measures.append(box_volume(p[:,i],p[:,j]),W)
+    for i in range(0, n):
+        for j in range(0, i):
+            if is_inside_box(x, p[:,i], p[:,j]):
+                boxes.append((i, j))
+                measures.append(box_volume(p[:,i], p[:,j], W))
     if not boxes:
-        return(-1,find_closest_element(x,p,W))
+        return(-1, find_closest_element(x, p, W))
     else:
         return(boxes[np.argmin(measures)])
 
@@ -395,64 +467,68 @@ def find_smallest_box(x, p, lim, W):
         lim = n
     dists = get_distances(x, p, W)
     dist_ord = dists.argsort()
-    n_box = min(lim,n)
+    n_box = min(lim, n)
     boxes = []
     measures = []
     #box_idxs_vol = np.zeros((n_box,3))
     for l in range(n_box):
-        for i in range(l + 1,n):
-            if is_inside_box(x,p[:,dist_ord[l]],p[:,dist_ord[i]]):
-                boxes.append((dist_ord[l],dist_ord[i]))
-                measures.append(box_volume(p[:,dist_ord[l]],p[:,dist_ord[i]],W))
+        for i in range(l + 1, n):
+            if is_inside_box(x, p[:,dist_ord[l]], p[:,dist_ord[i]]):
+                boxes.append((dist_ord[l], dist_ord[i]))
+                measures.append(box_volume(p[:,dist_ord[l]], p[:,dist_ord[i]], W))
     if not boxes:
-        return(-1,dist_ord[0])
+        return(-1, dist_ord[0])
     else:
         return boxes[np.argmin(measures)]
 
-def interpolate_bounding_box(x,a,b,fa,fb,W):
+def interpolate_bounding_box(x, a, b, fa, fb, W):
     W_ = np.diag(W)
     da = (a - x) @ W_ @ (a - x)
     db = (b - x) @ W_ @ (b - x)
     t = da / (da + db)
     return fa * (1 - t) + fb * t
 
-def interpolate_nearest_neighbour(x,a,b,fa,fb,W):
+def interpolate_nearest_neighbour(x, a, b, fa, fb, W):
     return fa 
 
 if interpolation_method == 'bounding-box':
     interpolate = interpolate_bounding_box
 elif interpolation_method == 'nearest-neighbour':
     interpolate = interpolate_nearest_neighbour
+else:
+    raise ValueError(f"Unknown interpolation_method: '{interpolation_method}'")
 
-def compute_dimension_scaling(subst,wn_min,wn_max,wn_reso):
+def compute_dimension_scaling(subst, wn_min, wn_max, wn_reso):
     # TODO: Should other W-elements be fitted too? It could boost the interpolation?
     # Antti M. (7.6.2024): The experiments with this show that in this formulation
     # at least, there is no guarantee of unique minimum for W with particular point cloud.
     # This approach should be set onto the backburner and instead of use the weights W
     # by scaling each of the dimensions with max(dim) - min(dim)
     filename = filenamefun(subst,wn_min,wn_max,wn_reso,function_choice)
-    Tvals,Pvals,Psvals,wn,xsec,W = load_xsec_data(subst,[wn_min,wn_max],wn_reso)
+    Tvals, Pvals, Psvals, wn, xsec, W = load_xsec_data(subst, [wn_min,wn_max], wn_reso)
     max_vals = [np.max(Tvals), np.max(Pvals), np.max(Psvals)]
     Tvals = Tvals / max_vals[0]
     Pvals = Pvals / max_vals[1]
     Psvals = Psvals / max_vals[2]
+    
     def find_interpolation_residue(W_):
         residy = 0
         for i in range(Tvals.size):
-            ma = np.zeros((Tvals.size,),dtype=np.bool_)
+            ma = np.zeros((Tvals.size,), dtype=np.bool_)
             ma[i] = True
             ma = np.logical_not(ma)
             TPPs = np.array([Tvals[ma].ravel(), Pvals[ma].ravel(), Psvals[ma].ravel()])
-            x = np.array([Tvals[i],Pvals[i],Psvals[i]])
-            (p_i,p_j) = find_smallest_box(x,TPPs,Tvals.size,W_)
+            x = np.array([Tvals[i], Pvals[i], Psvals[i]])
+            (p_i,p_j) = find_smallest_box(x, TPPs, Tvals.size, W_)
             if p_i != -1:
-                cs_interp = interpolate(x,TPPs[:,p_i],TPPs[:,p_j],xsec[p_i][:],xsec[p_j][:],W_)
+                cs_interp = interpolate(x, TPPs[:,p_i], TPPs[:,p_j], xsec[p_i][:], xsec[p_j][:],W_)
                 residy += np.sum(np.abs(cs_interp - xsec[i][:]))
         residy += np.linalg.norm(W_)
         return (residy)
+    
     def jacobian(W_):
         # This is defined because some minimization methods cannot handle the 
-        # dimenions properly. Nelder-Mead does not require this.
+        # dimensions properly. Nelder-Mead does not require this.
         diff_prop = 0.1
         mul = 1 + diff_prop
         init = find_interpolation_residue(W_)
@@ -461,39 +537,39 @@ def compute_dimension_scaling(subst,wn_min,wn_max,wn_reso):
         diff3 = (find_interpolation_residue(W_ * np.array([1.0,1.0,mul])) - init)
         return np.array([diff1,diff2,diff3])
     #minimize(find_interpolation_residue, W)
-    res = minimize(find_interpolation_residue, np.array([1.5,1.0,1.5]),method='Nelder-Mead',tol=1e-5,options={'maxiter':250})
-    W = np.array([res.x[0],res.x[1],res.x[2]])
+    res = minimize(find_interpolation_residue, np.array([1.5,1.0,1.5]), method='Nelder-Mead', tol=1e-5, options={'maxiter':250})
+    W = np.array([res.x[0], res.x[1], res.x[2]])
     print(W)
     #store W into the data
     return res
 
 #res = compute_dimension_scaling('CO2',nu_min,nu_max,nu_resolution)
 
-def database_interpolation(gas,wn_min,wn_max,wn_step,T,P,Ps):
+def database_interpolation(gas, wn_min, wn_max, wn_step, T, P, Ps):
 
     did_we_interp = []
     interp_box_indices = []
     interp_box_size = []
 
-    Tvals,Pvals,Psvals,wn,xsec,W = load_xsec_data(gas,[wn_min,wn_max],wn_step)
+    Tvals, Pvals, Psvals, wn, xsec, W = load_xsec_data(gas, [wn_min,wn_max], wn_step)
     
     fresh_csdb = (type(Tvals) == type(None)) #couldn't find the nc-file
 
     comp_xsec_idxs = []
     if fresh_csdb:
-        for alt_idx in range(0,T.size):
+        for alt_idx in range(0, T.size):
             comp_xsec_idxs.append(alt_idx)
-        wnAmt = np.array(np.arange(wn_min,wn_max,wn_step)).size
-        cs = np.zeros((T.size,wnAmt))
+        wnAmt = np.array(np.arange(wn_min, wn_max, wn_step)).size
+        cs = np.zeros((T.size, wnAmt))
         return wn, None
     else:
         TPPs = np.array([Tvals.ravel(), Pvals.ravel(), Psvals.ravel()])
-        cs = np.zeros((T.size,wn.size))
+        cs = np.zeros((T.size, wn.size))
         for alt_idx in range(0,T.size):
-            x = np.array([T[alt_idx],P[alt_idx],Ps[alt_idx]])
+            x = np.array([T[alt_idx], P[alt_idx], Ps[alt_idx]])
             if TPPs.size > 0:
                 for tpps_idx in range(TPPs.shape[1]):
-                    if np.all(np.isclose(x,TPPs[:,tpps_idx])):
+                    if np.all(np.isclose(x, TPPs[:, tpps_idx])):
                         #an almost exact same data point is found
                         #let's use that one straight away
                         i = tpps_idx
@@ -504,9 +580,9 @@ def database_interpolation(gas,wn_min,wn_max,wn_step,T,P,Ps):
                         # this is the case when there is no data in the csdb
                         i = -1
                     elif interpolation_method == 'bounding-box':
-                        (i,j) = find_smallest_box(x,TPPs,cl_interp_p,W)
+                        (i,j) = find_smallest_box(x, TPPs, cl_interp_p, W)
                         box_space_diagonal_ = TPPs[:,i] - TPPs[:,j]
-                        box_space_diagonal = box_space_diagonal_ * np.sqrt(W)
+                        box_space_diagonal = np.abs(box_space_diagonal_) * np.sqrt(W)
                         box_vol = np.prod(box_space_diagonal)
                         if box_vol > interpolation_error_tolerance:
                             i = -1
@@ -518,7 +594,7 @@ def database_interpolation(gas,wn_min,wn_max,wn_step,T,P,Ps):
                         if np.linalg.norm(x - TPPs[:,i]) > interpolation_error_tolerance:
                             i = -1
                     else:
-                        raise("No interpolation method '%s'" % interpolation_method)
+                        raise ValueError("No interpolation method '%s'" % interpolation_method)
             else: #if there's no data yet
                 i = -1
 
@@ -527,8 +603,8 @@ def database_interpolation(gas,wn_min,wn_max,wn_step,T,P,Ps):
                 comp_xsec_idxs.append(alt_idx)
             else:
                 #box found -> interpolate
-                cs[alt_idx,:] = interpolate(x,TPPs[:,i],TPPs[:,j],
-                xsec[i][:],xsec[j][:],W)
+                cs[alt_idx,:] = interpolate(x, TPPs[:,i], TPPs[:,j],
+                xsec[i][:], xsec[j][:], W)
             if i == -1:
                 did_we_interp.append(False)
                 interp_box_indices.append([-1,-1])
@@ -536,118 +612,182 @@ def database_interpolation(gas,wn_min,wn_max,wn_step,T,P,Ps):
             else:
                 did_we_interp.append(True)
                 interp_box_indices.append([i,j])
-                interp_box_size.append(box_volume(TPPs[:,i],TPPs[:,j], W))
+                interp_box_size.append(box_volume(TPPs[:,i], TPPs[:,j], W))
 
     if did_we_interp[0]:
         return wn, cs
     else:
         return wn, None
 
-
-# Fetch gases from HITRAN
-fetched_gases = []
-def fetch_lines(gas_fetch, nu_min, nu_max):
-    # Try to load gases and ignore a gas if HITRAN returns nothing
-    try:
-        hapi.fetch_by_ids(gas_fetch, gas_dict[gas_fetch], nu_min, nu_max)
-        return True
-    except Exception:
-        return False
-
-for gas in gas_dict:
-    fetched = fetch_lines(gas, nu_min, nu_max)
-    if fetched:
-        fetched_gases.append(gas)
-        
-
-lookup_table_gases = []
+##############################################################################
+### TABLE GAS CROSS-SECTIONS ###
+##############################################################################
 
 def ozone_cross_section(wavelength, temperature, data):
-    
+    """Compute O3 cross-section from lookup table."""
     if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range!")
+        print("Warning! Requested wavelength is outside the table wavelength range for O3!")
     
     C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
     C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
     C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
     
     T = temperature
+    table_id = crs_table_gases['O3']['id']
     
-    if crs_table_gases['O3']['id'] in ['molina', 'bass_and_paur', 'daumount']:
+    if table_id in ['molina', 'bass_and_paur', 'daumount']:
         T0 = 273.13
         sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    elif crs_table_gases['O3']['id'] in ['bogumil', 'bogumil_exp']:
+    elif table_id == 'bogumil':
         T0 = 273.15
-        if crs_table_gases['O3']['id'] == 'bogumil_exp':
-            # Alternative equation from Bogumil et al. 2003
-            sigma = (C0_interp * np.exp( - C1_interp*T + C2_interp/T)) * 1.E-20
-        else:
-            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
     else:
-        raise Exception('Oops! Unknown table id!')
+        raise KeyError(f"Oops! Unknown table id for O3: {table_id}")
     
     return sigma
 
 def nitrogen_oxide_cross_section(wavelength, temperature, data):
+    """Compute NO2 cross-section from lookup table."""
     if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range!")
+        print("Warning! Requested wavelength is outside the table wavelength range for NO2!")
+        
+    table_id = crs_table_gases['NO2']['id']
     
-    if crs_table_gases['NO2']['id'] in ['burrows', 'schneider']:
+    if table_id in ['burrows', 'schneider']:
         sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    elif crs_table_gases['NO2']['id'] in ['bogumil', 'bogumil_exp']:
+    elif table_id == 'bogumil':
         T0 = 273.15
         T = temperature
         C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
         C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
         C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
-        if crs_table_gases['O3']['id'] == 'bogumil_exp':
-            # Alternative equation from Bogumil et al. 2003
-            sigma = (C0_interp * np.exp( - C1_interp*T + C2_interp/T)) * 1.E-20
-        else:
-            sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
+        
+        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
     else:
-        raise Exception('Oops! Unknown table id!')
+        raise KeyError(f"Oops! Unknown table id for NO2: {table_id}")
     return sigma
 
 def oxygen_dimer(wavelength, data):
+    """Compute O2-O2 cross-section from lookup table."""
     if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range!")
+        print("Warning! Requested wavelength is outside the table wavelength range for O2-O2!")
     sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
     return sigma
 
+##############################################################################
+### LOAD GASES ###
+##############################################################################
+
+# Fetch gases from HITRAN
+fetched_gases = []
+
+def fetch_lines(gas_fetch, nu_min, nu_max, max_attempts=3, wait_s=10):
+    """
+    Fetch spectral lines for a gas from HITRAN.
+
+    A gas with no lines in the wavenumber range is skipped. Any other
+    failure (e.g. no connection) is retried and then stops the run.
+
+    Returns:
+        bool: True if successful, False if HITRAN has no lines for the gas.
+    """
+    for attempt in range(1, max_attempts + 1):
+        # Try to load gases and ignore a gas if HITRAN returns nothing
+        try:
+            hapi.fetch_by_ids(gas_fetch, gas_dict[gas_fetch], nu_min, nu_max)
+            return True
+        except Exception as e:
+            # Currently, HAPI gives this message when HITRAN has no lines in the range
+            # TODO: Check if this behaviour changes in newer HAPI versions
+            if 'Failed to retrieve data' in str(e):
+                print(f"\nWARNING! No {gas_fetch} lines found in HITRAN for the given range.")
+                print(f"{gas_fetch} is left out of the computation!")
+                return False
+            print(f"\nCould not fetch {gas_fetch} lines from HITRAN "
+                  f"(attempt {attempt}/{max_attempts}): {e}")
+            if attempt < max_attempts:
+                print(f"Retrying in {wait_s} s...")
+                time.sleep(wait_s)
+    print(f"\nERROR! Could not fetch {gas_fetch} lines from HITRAN after "
+          f"{max_attempts} attempts. Please check internet connection. "
+          "Stopping HAPI2LIBIS!")
+    sys.exit(1)        
+
+    
+    
+
+for gas in gas_dict:
+    if fetch_lines(gas, nu_min, nu_max):
+        fetched_gases.append(gas)
+        
+        
+# Load table data
+lookup_table_gases = []
 
 # Check that table gases are not downloaded by HAPI
 for crs_table_gas_id in crs_table_gases:
     if crs_table_gases[crs_table_gas_id]['use']:
         if crs_table_gas_id in fetched_gases:
-            print(f"\nWARNING! HAPI has downloaded {crs_table_gas_id} lines." * 10)
+            print(f"\nWARNING! HAPI has downloaded {crs_table_gas_id} lines, but it's also in lookup tables!")
             print("Beware of possible overlap with table values!")
         lookup_table_gases.append(crs_table_gas_id)
 
 if crs_table_gases['O3']['use']:
-    table_O3_paths = {'molina': f'{libradtranpath}/data/crs/crs_o3_mol_cf.dat',
-                      'bass_and_paur': f'{libradtranpath}/data/crs/crs_o3_pab_cf.dat', 
-                      'daumount': f'{libradtranpath}/data/crs/crs_o3_dau_cf.dat', 
-                      'bogumil': f'{libradtranpath}/data/crs/crs_O3_UBremen_cf.dat'}
-    table_O3 = np.loadtxt(table_O3_paths[crs_table_gases['O3']['id']], comments='#')
+    table_O3_paths = {
+        'molina': Path(libradtranpath) / "data" / "crs" / "crs_o3_mol_cf.dat",
+        'bass_and_paur': Path(libradtranpath) / "data" / "crs" / "crs_o3_pab_cf.dat", 
+        'daumount': Path(libradtranpath) / "data" / "crs" / "crs_o3_dau_cf.dat", 
+        'bogumil': Path(libradtranpath) / "data" / "crs" / "crs_O3_UBremen_cf.dat",
+        }
+    
+    if crs_table_gases['O3']['id'] not in table_O3_paths:
+        raise KeyError(f"Oops! Unknown table id for O3: {crs_table_gases['O3']['id']}")
+    
+    table_file = table_O3_paths[crs_table_gases['O3']['id']]
+    if table_file.exists():
+        crs_table_gases['O3']['data'] = np.loadtxt(table_file, comments='#')
+    else:
+        raise FileNotFoundError(f"Could not find table file for O3 in: {table_file}")
     
 if crs_table_gases['NO2']['use']:
-    table_NO2_paths = {'burrows': f'{libradtranpath}/data/crs/crs_no2_gom.dat',
-                       'bogumil': f'{libradtranpath}/data/crs/crs_NO2_UBremen_cf.dat', 
-                       'schneider': f'{libradtranpath}/data/crs/crs_no2_012.dat'}
-            
-    table_NO2 = np.loadtxt(table_NO2_paths[crs_table_gases['NO2']['id']], comments='#')
+    table_NO2_paths = {
+        'burrows': Path(libradtranpath) / "data" / "crs" / "crs_no2_gom.dat",
+        'bogumil': Path(libradtranpath) / "data" / "crs" / "crs_NO2_UBremen_cf.dat", 
+        'schneider': Path(libradtranpath) / "data" / "crs" / "crs_no2_012.dat"}
+    
+    if crs_table_gases['NO2']['id'] not in table_NO2_paths:
+        raise KeyError(f"Oops! Unknown table id for NO2: {crs_table_gases['NO2']['id']}")
+    
+    table_file = table_NO2_paths[crs_table_gases['NO2']['id']]
+    if table_file.exists():
+        crs_table_gases['NO2']['data'] = np.loadtxt(table_file, comments='#')
+    else:
+        raise FileNotFoundError(f"Could not find table file for NO2 in: {table_file}")
     
 if crs_table_gases['O2-O2']['use']:    
-    table_O2_O2_paths = {'greenblatt': f'{libradtranpath}/data/crs/crs_o4_greenblatt.dat'}
+    table_O2_O2_paths = {
+        'greenblatt': Path(libradtranpath) / "data" / "crs" / "crs_o4_greenblatt.dat"}
     
-    table_O2_O2 = np.loadtxt(table_O2_O2_paths[crs_table_gases['O2-O2']['id']])
+    if crs_table_gases['O2-O2']['id'] not in table_O2_O2_paths:
+        raise KeyError(f"Oops! Unknown table id for O2-O2: {crs_table_gases['O2-O2']['id']}")
+        
+    table_file = table_O2_O2_paths[crs_table_gases['O2-O2']['id']]
+    if table_file.exists():
+        crs_table_gases['O2-O2']['data'] = np.loadtxt(table_file)
+    else:
+        raise FileNotFoundError(f"Could not find table file for O2-O2 in: {table_file}")
+
+
+##############################################################################
+### MAIN COMPUTATION LOOP ###
+##############################################################################
 
 if __name__ == '__main__':
-    import time
-    # this is to time the computations
-    # the lines are downloaded every time, so we do not want to include
-    # that into the script timing.
+
+    print("Starting HAPI2LIBIS computation.")
+    
+    # Initialize calculation range in case only table gases are used
+    nu_high = np.arange(nu_min, nu_max, nu_resolution)
     
     # Generate interpolators for atm
     altitude = atm_arr[:, atm_col_id_dict['altitude']]
@@ -657,27 +797,31 @@ if __name__ == '__main__':
     pressure_int = interp1d(altitude, pressure)
     temperature_int = interp1d(altitude, temperature)
     
-    # Generate interpolators for gases
-    gas_int_dict = {}
+    # Setup interpolators for gases
+    gas_int_dict = {'air':interp1d(altitude, atm_arr[:, atm_col_id_dict['air']])}
     
-    gas_int_dict.update({'air':interp1d(altitude, atm_arr[:, atm_col_id_dict['air']])})
     for gas_int in fetched_gases:
         gas_int_dict.update({gas_int:interp1d(altitude, atm_arr[:, atm_col_id_dict[gas_int]])})
         
     for gas_int in lookup_table_gases:
         if gas_int == 'O2-O2':
-            oxygen_dimer_vertical_profile = 1e-46*atm_arr[:, atm_col_id_dict['O2']]**2
+            # O2-O2 profile is computed from O2 profile. This should be added
+            # to documentation or as a check with appropriate error message.
+            o2_profile = atm_arr[:, atm_col_id_dict['O2']]
+            oxygen_dimer_vertical_profile = 1e-46 * o2_profile ** 2
             gas_int_dict.update({gas_int:interp1d(altitude, oxygen_dimer_vertical_profile)})
         else:
             gas_int_dict.update({gas_int:interp1d(altitude, atm_arr[:, atm_col_id_dict[gas_int]])})
-    #%%
+
     # Layer middle point might introduce error, check if possible to compute at layer boundary
     # Main loop
     profile = []
     
     start_time = time.time()
     for l in range(len(altitude) - 1):
-        print('\nComputing {} {}/{}'.format(['layer', 'level'][slab_midpoint_flag], l + 1, len(altitude) - 1))
+        layer_type = 'layer' if slab_midpoint_flag else 'level'
+        print()
+        print(f"Computing {layer_type} {l+1}/{len(altitude) - 1}")      
         
         # Layer altitude and size
         lz = np.abs(altitude[l] - altitude[l+1])
@@ -698,6 +842,7 @@ if __name__ == '__main__':
           
         # Compute mixing ratios
         total_gases = 0
+        
         diluent_dict = {}
         for gas_percent in fetched_gases:
             total_gases += gas_concentration_dict[gas_percent]
@@ -718,8 +863,8 @@ if __name__ == '__main__':
         for compute_gas in fetched_gases:
             print(f"Computing gas: {compute_gas}")
             if use_xsec_db:
-                nu_high, coef_high = database_interpolation(compute_gas,nu_min,nu_max,nu_resolution,
-                                   np.array([temp_middle]),np.array([pressure_middle]),np.array([diluent_dict[compute_gas]]))
+                nu_high, coef_high = database_interpolation(compute_gas, nu_min, nu_max, nu_resolution,
+                                   np.array([temp_middle]), np.array([pressure_middle]), np.array([diluent_dict[compute_gas]]))
                 if not type(coef_high) == type(None):
                     coef_high = coef_high.ravel()
             else:
@@ -739,60 +884,75 @@ if __name__ == '__main__':
                                                             'p':pressure_middle},
                                                HITRAN_units=True)
                 if use_xsec_db:
-                    input_xsec_data(compute_gas,np.array([temp_middle]),
-                        np.array([pressure_middle]),np.array([diluent_dict[compute_gas]]),
-                        nu_min,nu_max,nu_resolution,nu_high,coef_high)
+                    input_xsec_data(compute_gas, np.array([temp_middle]),
+                        np.array([pressure_middle]), np.array([diluent_dict[compute_gas]]),
+                        nu_min, nu_max, nu_resolution, nu_high, coef_high)
             abs_coef += coef_high * gas_concentration_dict[compute_gas]
+            
+            
+        # Add table gases
         for compute_gas in lookup_table_gases:
+            print(f"Computing table {compute_gas}.")
+            
+            wavelength_nm = 1 / (nu_high * 1e-7)
+            
             if compute_gas == 'O3':
-                print('Computing table O3!')
-                abs_coef += ozone_cross_section(1 / (nu_high * 1e-7), temp_middle, table_O3) * gas_concentration_dict[compute_gas]
+                sigma = ozone_cross_section(wavelength_nm, temp_middle, crs_table_gases[compute_gas]['data'])
+                # abs_coef += ozone_cross_section(1 / (nu_high * 1e-7), temp_middle, crs_table_gases[compute_gas]['data']) * gas_concentration_dict[compute_gas]
             elif compute_gas == 'NO2':
-                print('Computing table NO2!')
-                abs_coef += nitrogen_oxide_cross_section(1 / (nu_high * 1e-7), temp_middle, table_NO2) * gas_concentration_dict[compute_gas]
+                sigma = nitrogen_oxide_cross_section(wavelength_nm, temp_middle, crs_table_gases[compute_gas]['data'])
+                # abs_coef += nitrogen_oxide_cross_section(1 / (nu_high * 1e-7), temp_middle, crs_table_gases[compute_gas]['data']) * gas_concentration_dict[compute_gas]
             elif compute_gas == 'O2-O2':
-                print('Computing table O2-O2!')
-                abs_coef += oxygen_dimer(1 / (nu_high * 1e-7), table_O2_O2) * gas_concentration_dict[compute_gas]
+                sigma = oxygen_dimer(wavelength_nm, crs_table_gases[compute_gas]['data'])
+                # abs_coef += oxygen_dimer(1 / (nu_high * 1e-7), crs_table_gases[compute_gas]['data']) * gas_concentration_dict[compute_gas]
             else:
-                print('Oops! Table gas not implemented yet!')
+                print(f"Oops! Table gas {compute_gas} not implemented yet!")
+                sigma = 0
+            abs_coef += sigma * gas_concentration_dict[compute_gas]
         optical_path = abs_coef * lz * 1e5
         profile.append(optical_path)
     
     if check_wavelength_limits:
-        try:
-            kurucs_full_wl = np.loadtxt(f'{libradtranpath}/data/solar_flux/kurudz_full.dat', comments='#', usecols=0)
-            kurucs_lims = np.where(np.logical_and(kurucs_full_wl >= wl_range_nm[0], kurucs_full_wl <= wl_range_nm[-1]))[0]
-            
-            kurucs_min = kurucs_full_wl[kurucs_lims[0]]
-            kurucs_max = kurucs_full_wl[kurucs_lims[-1]]
-            
-            print('When using file kurudz_full.dat in libRadtran')
-            print(f'Minimum wavelength is: {kurucs_min}')
-            print(f'Maximum wavelength is: {kurucs_max}')
-    
-        except (OSError, FileNotFoundError):
+        kurucs_file = Path(libradtranpath) / "data" / "solar_flux" / "kurudz_full.dat"
+        if kurucs_file.exists():
+            try:
+                kurucs_full_wl = np.loadtxt(kurucs_file, comments='#', usecols=0)
+                kurucs_lims = np.where(np.logical_and(
+                    kurucs_full_wl >= wl_range_nm[0], 
+                    kurucs_full_wl <= wl_range_nm[-1]))[0]
+                
+                # kurucs_min = kurucs_full_wl[kurucs_lims[0]]
+                # kurucs_max = kurucs_full_wl[kurucs_lims[-1]]
+                
+                print("When using file kurudz_full.dat in libRadtran")
+                print(f"Minimum wavelength is: {kurucs_full_wl[kurucs_lims[0]]}")
+                print(f"Maximum wavelength is: {kurucs_full_wl[kurucs_lims[-1]]}")
+        
+            except (OSError, FileNotFoundError):
+                print("Could not read kurudz_full.dat file")
+                print('Cannot provide limits for non-reflectivity calculations!')
+        else:
             print('File kurudz_full.dat not found in "<libRadtran_path>/data/solar_flux/"')
+            print(f"Provided path: {kurucs_file}")
             print('Cannot provide limits for non-reflectivity calculations!')
                 
     if create_mol_abs_netcdf_file:
-        
         # This netcdf file is for libRadtran
         if atmosphere_id == "custom":
-            atmos_str = 'custom'
+            atmos_str = "custom"
         else:
             atmos_str = atmosphere_dict[atmosphere_id]
-        molabs_fname = 'uvspec_{}_{}.nc'.format(atmos_str, name_suffix)
+        molabs_fname = f"uvspec_{atmos_str}_{name_suffix}.nc"
         with Dataset(molabs_fname, 'w', format='NETCDF4') as nc:
-        
             # Global attributes
-            nc.description = 'Molecular absorption optical depth file for libRadtran. Computed with HAPI2LIBIS.'
-            nc.wavelength = 'Wavelength range {}-{} nm.'.format(wl_range_nm[0], wl_range_nm[-1])
-            nc.use = 'mol_tau_file abs thisfile.nc'
+            nc.description = "Molecular absorption optical depth file for libRadtran. Computed with HAPI2LIBIS."
+            nc.wavelength = f"Wavelength range {wl_range_nm[0]}-{wl_range_nm[-1]} nm."
+            nc.use = "mol_tau_file abs thisfile.nc"
         
             # Dimensions
             nc.createDimension('nlev', len(altitude))
             nc.createDimension('nlyr', len(altitude) - 1)
-            nc.createDimension('nwvl', len(coef_high))
+            nc.createDimension('nwvl', len(nu_high))
         
             # Variables
             nc_wvlmin = nc.createVariable('wvlmin','f8',())
@@ -831,5 +991,5 @@ if __name__ == '__main__':
             nc_wvl[:]    = wl_num2nm
             nc_tau[:, :] = opticalPath_nm
         print('Saved mol.abs. file "%s"' % molabs_fname)
-    print('HAPI2LIBIS done!')
+    print('HAPI2LIBIS run completed successfully!')
 
