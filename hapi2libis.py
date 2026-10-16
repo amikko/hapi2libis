@@ -5,27 +5,8 @@
 # 1: Finnish Meteorological Institute
 # Correspondence: antti.kukkurainen@fmi.fi
 
-# HAPI2LIBIS v1.0.0-dev -> v1.1.0
-"""Changelog:
-- Modified function 'load_default_atmosphere' to use pathlib. This change should
-be applied to other paths as well to maintain compatibility between OSs.
-- Added exceptions to 'load_default_atmosphere' if files missing.
-- Moved settings loading to a new function and added option to change default path.
-- Added comment blocks for easier navigation.
-- Fixed bug in 'nitrogen_oxide_cross_section' when using table id 'bogumil_exp'.
-- Added wavelength initialization so if only table gases are used, code doesn't crash.
-- Added pathlib to other paths.
-- Changed table gas computation to use general "sigma" term
-- Fixed crash when writing the output file if only table gases are used.
-- Fixed raise of a plain string in database_interpolation.
-- Unknown interpolation_method now raises an error.
-- Fixed bracket in find_smallest_box_bf.
-- Fixed wrong file path in the auxiliary-file error message.
-- Fixed possibility for a negative volume box 
-- Added warning when gas is skipped
-- Modified fetch_lines function to retry on connection failure.
+# HAPI2LIBIS v1.1.0
 
-"""
 
 import sys
 import time
