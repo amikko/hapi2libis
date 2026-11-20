@@ -623,56 +623,66 @@ def database_interpolation(gas, wn_min, wn_max, wn_step, T, P, Ps):
 ### TABLE GAS CROSS-SECTIONS ###
 ##############################################################################
 
-def ozone_cross_section(wavelength, temperature, data):
-    """Compute O3 cross-section from lookup table."""
-    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range for O3!")
-    
-    C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
-    C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
-    
-    T = temperature
-    table_id = crs_table_gases['O3']['id']
-    
-    if table_id in ['molina', 'bass_and_paur', 'daumount']:
-        T0 = 273.13
-        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    elif table_id == 'bogumil':
-        T0 = 273.15
-        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    else:
-        raise KeyError(f"Oops! Unknown table id for O3: {table_id}")
-    
-    return sigma
+# Cross-section tables in <libRadtran>/data/crs. The first id of each gas is its default.
+# 'quadratic': sigma = (C0 + C1 (T-T0) + C2 (T-T0)^2) * scale
+# 'constant':  sigma = column 2 * scale (no temperature dependence)
+TABLE_GASES = {
+    'O3': {
+        'molina':        {'file': 'crs_o3_mol_cf.dat',     'formula': 'quadratic', 'T0': 273.13, 'scale': 1e-20},
+        'bass_and_paur': {'file': 'crs_o3_pab_cf.dat',     'formula': 'quadratic', 'T0': 273.13, 'scale': 1e-20},
+        'daumount':      {'file': 'crs_o3_dau_cf.dat',     'formula': 'quadratic', 'T0': 273.13, 'scale': 1e-20},
+        'bogumil':       {'file': 'crs_O3_UBremen_cf.dat', 'formula': 'quadratic', 'T0': 273.15, 'scale': 1e-20},
+        },
+    'NO2': {
+        'burrows':   {'file': 'crs_no2_gom.dat',        'formula': 'constant',  'scale': 1.0},
+        'schneider': {'file': 'crs_no2_012.dat',        'formula': 'constant',  'scale': 1.0},
+        'bogumil':   {'file': 'crs_NO2_UBremen_cf.dat', 'formula': 'quadratic', 'T0': 273.15, 'scale': 1e-20},
+        },
+    'O2-O2': {
+        # Table in units of 1e-46 cm5; the profile is 1e-46 * n(O2)^2 (as in libRadtran)
+        'greenblatt': {'file': 'crs_o4_greenblatt.dat', 'formula': 'constant', 'scale': 1.0},
+        },
+    }
 
-def nitrogen_oxide_cross_section(wavelength, temperature, data):
-    """Compute NO2 cross-section from lookup table."""
-    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range for NO2!")
-        
-    table_id = crs_table_gases['NO2']['id']
-    
-    if table_id in ['burrows', 'schneider']:
-        sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    elif table_id == 'bogumil':
-        T0 = 273.15
-        T = temperature
-        C0_interp = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-        C1_interp = np.interp(wavelength, data[:, 0], data[:, 2], left=0, right=0)
-        C2_interp = np.interp(wavelength, data[:, 0], data[:, 3], left=0, right=0)
-        
-        sigma = (C0_interp + C1_interp*(T-T0) + C2_interp*(T-T0)**2) * 1.E-20
-    else:
-        raise KeyError(f"Oops! Unknown table id for NO2: {table_id}")
-    return sigma
+def load_table(gas, table_id, libradtranpath):
+    """Read one cross-section table and return its description plus the data."""
 
-def oxygen_dimer(wavelength, data):
-    """Compute O2-O2 cross-section from lookup table."""
-    if (np.min(wavelength) < data[0, 0]) or (np.max(wavelength) > data[-1, 0]):
-        print("Warning! Requested wavelength is outside the table wavelength range for O2-O2!")
-    sigma = np.interp(wavelength, data[:, 0], data[:, 1], left=0, right=0)
-    return sigma
+    if gas not in TABLE_GASES:
+        raise KeyError(f"No cross-section table for gas '{gas}'. "
+                       f"Available: {list(TABLE_GASES)}")
+    if table_id not in TABLE_GASES[gas]:
+        raise KeyError(f"Unknown table id '{table_id}' for {gas}. "
+                       f"Valid ids: {list(TABLE_GASES[gas])}")
+    table = dict(TABLE_GASES[gas][table_id])
+    table_file = Path(libradtranpath) / "data" / "crs" / table['file']
+    if not table_file.exists():
+        raise FileNotFoundError(f"Could not find table file for {gas} in: {table_file}")
+    data = np.loadtxt(table_file, comments='#')
+    
+    # Some files end with padding rows of zeros (e.g. crs_no2_012.dat),
+    # but np.interp needs increasing wavelengths
+    data = data[data[:, 0] > 0]
+    if np.any(np.diff(data[:, 0]) <= 0):
+        raise ValueError(f"Wavelengths in table file {table_file} are not increasing.")
+    table['data'] = data
+    return table
+
+def table_cross_section(table, wavelength_nm, temperature):
+    """Cross-section (cm2) from a table, zero outside its wavelength range."""
+    data = table['data']
+    
+    def table_column(i):
+        return np.interp(wavelength_nm, data[:, 0], data[:, i], left=0, right=0)
+    
+    if table['formula'] == 'constant':
+        sigma = table_column(1)
+    elif table['formula'] == 'quadratic':
+        dT = temperature - table['T0']
+        sigma = table_column(1) + table_column(2) * dT + table_column(3) * dT**2
+    else:
+        raise ValueError(f"Unknown table formula: {table['formula']}")
+    return sigma * table['scale']
+
 
 ##############################################################################
 ### LOAD GASES ###
@@ -698,7 +708,7 @@ def fetch_lines(gas_fetch, nu_min, nu_max, max_attempts=3, wait_s=10):
             return True
         except Exception as e:
             # Currently, HAPI gives this message when HITRAN has no lines in the range
-            # TODO: Check if this behaviour changes in newer HAPI versions
+            # Remember to check if this behaviour changes in newer HAPI versions
             if 'Failed to retrieve data' in str(e):
                 print(f"\nWARNING! No {gas_fetch} lines found in HITRAN for the given range.")
                 print(f"{gas_fetch} is left out of the computation!")
@@ -714,8 +724,6 @@ def fetch_lines(gas_fetch, nu_min, nu_max, max_attempts=3, wait_s=10):
     sys.exit(1)        
 
     
-    
-
 for gas in gas_dict:
     if fetch_lines(gas, nu_min, nu_max):
         fetched_gases.append(gas)
@@ -723,59 +731,25 @@ for gas in gas_dict:
         
 # Load table data
 lookup_table_gases = []
+tables = {}
 
-# Check that table gases are not downloaded by HAPI
-for crs_table_gas_id in crs_table_gases:
-    if crs_table_gases[crs_table_gas_id]['use']:
-        if crs_table_gas_id in fetched_gases:
-            print(f"\nWARNING! HAPI has downloaded {crs_table_gas_id} lines, but it's also in lookup tables!")
-            print("Beware of possible overlap with table values!")
-        lookup_table_gases.append(crs_table_gas_id)
+for table_gas, table_settings in crs_table_gases.items():
+    if not table_settings['use']:
+        continue
 
-if crs_table_gases['O3']['use']:
-    table_O3_paths = {
-        'molina': Path(libradtranpath) / "data" / "crs" / "crs_o3_mol_cf.dat",
-        'bass_and_paur': Path(libradtranpath) / "data" / "crs" / "crs_o3_pab_cf.dat", 
-        'daumount': Path(libradtranpath) / "data" / "crs" / "crs_o3_dau_cf.dat", 
-        'bogumil': Path(libradtranpath) / "data" / "crs" / "crs_O3_UBremen_cf.dat",
-        }
+    # Check that table gases are not downloaded by HAPI
+    if table_gas in fetched_gases:
+        print(f"\nWARNING! HAPI has downloaded {table_gas} lines, but it's also in lookup tables!")
+        print("Beware of possible overlap with table values!")
     
-    if crs_table_gases['O3']['id'] not in table_O3_paths:
-        raise KeyError(f"Oops! Unknown table id for O3: {crs_table_gases['O3']['id']}")
+    tables[table_gas] = load_table(table_gas, table_settings['id'], libradtranpath)
+    lookup_table_gases.append(table_gas)
     
-    table_file = table_O3_paths[crs_table_gases['O3']['id']]
-    if table_file.exists():
-        crs_table_gases['O3']['data'] = np.loadtxt(table_file, comments='#')
-    else:
-        raise FileNotFoundError(f"Could not find table file for O3 in: {table_file}")
-    
-if crs_table_gases['NO2']['use']:
-    table_NO2_paths = {
-        'burrows': Path(libradtranpath) / "data" / "crs" / "crs_no2_gom.dat",
-        'bogumil': Path(libradtranpath) / "data" / "crs" / "crs_NO2_UBremen_cf.dat", 
-        'schneider': Path(libradtranpath) / "data" / "crs" / "crs_no2_012.dat"}
-    
-    if crs_table_gases['NO2']['id'] not in table_NO2_paths:
-        raise KeyError(f"Oops! Unknown table id for NO2: {crs_table_gases['NO2']['id']}")
-    
-    table_file = table_NO2_paths[crs_table_gases['NO2']['id']]
-    if table_file.exists():
-        crs_table_gases['NO2']['data'] = np.loadtxt(table_file, comments='#')
-    else:
-        raise FileNotFoundError(f"Could not find table file for NO2 in: {table_file}")
-    
-if crs_table_gases['O2-O2']['use']:    
-    table_O2_O2_paths = {
-        'greenblatt': Path(libradtranpath) / "data" / "crs" / "crs_o4_greenblatt.dat"}
-    
-    if crs_table_gases['O2-O2']['id'] not in table_O2_O2_paths:
-        raise KeyError(f"Oops! Unknown table id for O2-O2: {crs_table_gases['O2-O2']['id']}")
-        
-    table_file = table_O2_O2_paths[crs_table_gases['O2-O2']['id']]
-    if table_file.exists():
-        crs_table_gases['O2-O2']['data'] = np.loadtxt(table_file)
-    else:
-        raise FileNotFoundError(f"Could not find table file for O2-O2 in: {table_file}")
+    # Warn if the table does not cover the whole range
+    table_wl = tables[table_gas]['data'][:, 0]
+    if (wl_range_nm[0] < table_wl[0]) or (wl_range_nm[-1] > table_wl[-1]):
+        print(f"Warning! Requested wavelength range is partly or fully outside "
+              f"the {table_gas} table ({table_wl[0]}-{table_wl[-1]} nm)!")
 
 
 ##############################################################################
@@ -895,19 +869,7 @@ if __name__ == '__main__':
             print(f"Computing table {compute_gas}.")
             
             wavelength_nm = 1 / (nu_high * 1e-7)
-            
-            if compute_gas == 'O3':
-                sigma = ozone_cross_section(wavelength_nm, temp_middle, crs_table_gases[compute_gas]['data'])
-                # abs_coef += ozone_cross_section(1 / (nu_high * 1e-7), temp_middle, crs_table_gases[compute_gas]['data']) * gas_concentration_dict[compute_gas]
-            elif compute_gas == 'NO2':
-                sigma = nitrogen_oxide_cross_section(wavelength_nm, temp_middle, crs_table_gases[compute_gas]['data'])
-                # abs_coef += nitrogen_oxide_cross_section(1 / (nu_high * 1e-7), temp_middle, crs_table_gases[compute_gas]['data']) * gas_concentration_dict[compute_gas]
-            elif compute_gas == 'O2-O2':
-                sigma = oxygen_dimer(wavelength_nm, crs_table_gases[compute_gas]['data'])
-                # abs_coef += oxygen_dimer(1 / (nu_high * 1e-7), crs_table_gases[compute_gas]['data']) * gas_concentration_dict[compute_gas]
-            else:
-                print(f"Oops! Table gas {compute_gas} not implemented yet!")
-                sigma = 0
+            sigma = table_cross_section(tables[compute_gas], wavelength_nm, temp_middle)
             abs_coef += sigma * gas_concentration_dict[compute_gas]
         optical_path = abs_coef * lz * 1e5
         profile.append(optical_path)

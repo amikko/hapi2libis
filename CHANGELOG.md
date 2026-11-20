@@ -4,6 +4,29 @@ All notable changes to HAPI2LIBIS are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project (more or less) follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- NO2 table `schneider` (`crs_no2_012.dat`) gave a zero cross-section at
+  every wavelength. The file ends with two padding rows of zeros, which broke
+  the wavelength interpolation. Padding rows are now removed when a table is
+  read, and a table whose wavelengths are not increasing stops the run with
+  an error.
+
+### Changed
+- Table gases: all cross-section tables are described in one dictionary,
+  `TABLE_GASES`, and are read and evaluated by two functions, `load_table()`
+  and `table_cross_section()`. These replace `ozone_cross_section()`,
+  `nitrogen_oxide_cross_section()`, `oxygen_dimer()` and the separate loading
+  code for each gas. Results are unchanged (except `schneider`, see above).
+- A gas in `crs_table_gases` without a table now stops the run at start-up
+  with a message listing the available gases. Previously the run failed later
+  with a `KeyError`, or, with a custom atmosphere containing that gas, the gas
+  was left out with only a message.
+- The warning that a table does not cover the requested wavelength range is
+  printed once at start-up instead of once per layer.
+  
+
 ## [1.1.0] - 2026-10-16
 
 Bug-fix and robustness release. Configuration files and cross-section
