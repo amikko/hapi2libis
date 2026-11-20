@@ -7,11 +7,11 @@
 ##############################################################################
 
 # Location of main libRadtran folder.
-libradtranpath: '/home/kukkurai/bin/libRadtran-2.0.6'
+libradtranpath: '/home/kukkurai/Programs/libRadtran/libRadtran-2.0.6'
 # libradtranpath: '/home/mikkonea/Projects/arsca-suite/rt_solvers/libradtran/libRadtran-2.0.5'
 
 # Desired wavelength range in nanometers.
-wl_range_nm : [1600,1700]
+wl_range_nm : [1600, 1700]
 
 # HAPI resolution in wavenumbers.
 nu_resolution: 0.01
@@ -52,6 +52,11 @@ interpolation_error_tolerance: 0.1
 
 # Folder to save HITRAN data.
 hapi_dl_dir: 'hitran_data'
+
+# Line wing in cm-1: each line is computed up to this distance from its centre,
+# and lines up to this distance outside wl_range_nm are downloaded.
+# null: HAPI's default (50 half-widths), which loses absorption in strong bands.
+line_wing_cm: 25
 
 # Load profiles for CH4, N2O, CO and N2 from auxiliary US-standard files.
 load_aux_gases_from_us_standard: True

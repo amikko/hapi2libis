@@ -124,6 +124,10 @@ libradtranpath = settings['libradtranpath']
 # Broadening function choice
 function_choice = settings['function_choice']
 
+# Line wing: each line is computed up to this distance (cm-1) from its centre.
+# None (null in the config file) uses HAPI's default of 50 half-widths.
+line_wing_cm = settings.get('line_wing_cm', 25.0)
+
 # Folder to save HITRAN data
 hapi_dl_dir = settings['hapi_dl_dir']
 
@@ -210,6 +214,19 @@ function_listing = {'Lorentz' : hapi.absorptionCoefficient_Lorentz,
                     'HT'      : hapi.absorptionCoefficient_HT,
                     'SDVoigt' : hapi.absorptionCoefficient_SDVoigt}
 broadening_func = function_listing[function_choice]
+
+# Line wing for HAPI, and the margin for downloading lines outside the range
+if line_wing_cm is None:
+    wing_args = {}
+    # HAPI's 50 half-widths stay below 25 cm-1 in the Earth's atmosphere
+    fetch_margin = 25.0
+elif isinstance(line_wing_cm, (int, float)) and line_wing_cm > 0:
+    # HAPI cuts each line at max(WavenumberWing, WavenumberWingHW * half-width).
+    # Setting WavenumberWingHW to 0 gives exactly W cm-1 for every line in every layer.
+    wing_args = {'WavenumberWing': float(line_wing_cm), 'WavenumberWingHW': 0.0}
+    fetch_margin = float(line_wing_cm)
+else:
+    raise ValueError(f"line_wing_cm must be a positive number (cm-1) or null, not {line_wing_cm!r}")
 
 # Initialize HAPI
 hapi.db_begin(hapi_dl_dir)
@@ -348,7 +365,12 @@ def setup_file(subst, wn, filename):
 
 def filenamefun(subst, wn_min, wn_max, wn_reso, function_choice):
     """Generate database filename."""
-    return folder_csdb() / str('%s_%f_%f_%f_%s.nc' % (subst,wn_min,wn_max,wn_reso,function_choice))
+    if line_wing_cm is None:
+        wing_str = 'wing50hw'
+    else:
+        wing_str = f'wing{line_wing_cm:g}cm'
+    return folder_csdb() / str('%s_%f_%f_%f_%s_%s.nc' % 
+       (subst, wn_min, wn_max, wn_reso, function_choice, wing_str))
 
 def input_xsec_data(subst, T, P, Ps, wn_min, wn_max, wn_reso, wn, xsec):
     """
@@ -723,9 +745,9 @@ def fetch_lines(gas_fetch, nu_min, nu_max, max_attempts=3, wait_s=10):
           "Stopping HAPI2LIBIS!")
     sys.exit(1)        
 
-    
+# Include margin for wings for lines just outside the range
 for gas in gas_dict:
-    if fetch_lines(gas, nu_min, nu_max):
+    if fetch_lines(gas, max(nu_min - fetch_margin, 0.0), nu_max + fetch_margin):
         fetched_gases.append(gas)
         
         
@@ -856,7 +878,8 @@ if __name__ == '__main__':
                                                WavenumberRange=[nu_min, nu_max],
                                                Environment={'T':temp_middle,
                                                             'p':pressure_middle},
-                                               HITRAN_units=True)
+                                               HITRAN_units=True,
+                                               **wing_args)
                 if use_xsec_db:
                     input_xsec_data(compute_gas, np.array([temp_middle]),
                         np.array([pressure_middle]), np.array([diluent_dict[compute_gas]]),

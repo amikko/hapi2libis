@@ -45,6 +45,7 @@ These are currently:
 - `interpolation_method`: Chosen interpolation method.
 - `interpolation_error_tolerance`: The maximum volume of the box allowed for interpolation, or the maximum distance from particular point.
 - `hapi_dl_dir`: Folder to save HITRAN data.
+- `line_wing_cm`: Line wing in cm-1 (default 25). Lines are computed up to this distance from their centre, and lines up to this distance outside the wavelength range are downloaded. `null` uses HAPI's default of 50 half-widths.
 - `load_aux_gases_from_us_standard`: Load profiles for CH4, N2O, CO and N2 from auxiliary US-standard files.
 - `create_mol_abs_netcdf_file`: Write molecular absorption netcdf file for libradtran.
 - `interpolate_to_layer_midpoint`: Interpolate atmospheric gases to layer middle point.
