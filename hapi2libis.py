@@ -866,14 +866,17 @@ if __name__ == '__main__':
             else:
                 coef_high = None
             if type(coef_high) == type(None):
-                # if compute_gas not in fetched_gases:
-                    # fetch_lines(compute_gas, nu_min, nu_max)
-                    # fetched_gases.append(compute_gas)
+                # HITRAN's gamma_air is the broadening by air. For the main
+                # components of air (N2, O2) it already contains their own
+                # share, so they are broadened by air only.
+                if compute_gas in ('N2', 'O2'):
+                    diluent = {'air': 1.0}
+                else:
+                    diluent = {'air': 1 - diluent_dict[compute_gas],
+                               'self': diluent_dict[compute_gas]}
                 nu_high, coef_high = broadening_func(
                                                SourceTables=[compute_gas],
-                                               Diluent={'air': 1 - diluent_dict[compute_gas],
-                                                        #'air': diluent_dict['air'],
-                                                        'self': diluent_dict[compute_gas]},
+                                               Diluent=diluent,
                                                WavenumberStep=nu_resolution,
                                                WavenumberRange=[nu_min, nu_max],
                                                Environment={'T':temp_middle,
